@@ -1,0 +1,9 @@
+# Cached http responses for development
+.cache
+
+# Discord token
+.env
+
+# Added by cargo
+
+/target

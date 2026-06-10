@@ -1,0 +1,5 @@
+server_replay_reuse: true
+save_stream_file: +.cache/cached-requests
+server_replay:
+- .cache/cached-requests
+save_stream_filter: '!( ~replays )'

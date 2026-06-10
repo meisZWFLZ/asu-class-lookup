@@ -1,0 +1,24 @@
+services:
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    volumes:
+      - ./.cache:/cache
+      - ./http-cache/plugin.py:/plugin.py:ro
+      - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
+    ports:
+      - "8080:8080"
+    stdin_open: true
+    tty: true
+    environment:
+      FLOW_CACHE_PATH: /cache/cached-flows.mitm
+    command:
+      - mitmdump
+      - -w
+      - +/cache/cached-flows.mitm
+      # - -S
+      # - /cache/cached-flows.mitm
+      - --set
+      - "save_stream_filter=!( ~replays )"
+      - --server-replay-reuse
+      - -s
+      - /plugin.py
