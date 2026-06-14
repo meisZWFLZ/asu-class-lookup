@@ -1,0 +1,9 @@
+services:
+  asu-class-pingbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    container_name: asu-class-pingbot

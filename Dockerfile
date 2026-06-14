@@ -7,7 +7,7 @@ COPY src ./src
 
 RUN cargo build --locked --release
 
-FROM debian:bookworm
+FROM debian:bookworm-slim
 
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends ca-certificates \
@@ -19,13 +19,8 @@ COPY --from=builder /app/target/release/asu-class-lookup /usr/local/bin/asu-clas
 COPY --from=ghcr.io/nushell/nushell:0.113.1-bookworm /usr/bin/nu /usr/bin/nu
 
 COPY asu.nu /app/asu.nu
-# COPY docker/crontab /etc/cron.d/class-checker-cron-job
 
-
-# RUN chmod 0644 /etc/cron.d/class-checker-cron-job \
-#   && crontab /etc/cron.d/class-checker-cron-job
-
-# # Create your log file
-# RUN touch /var/log/cron.log
+# Log all messages from script
+ENV NU_LOG_LEVEL=DEBUG
 
 CMD ["/app/asu.nu"]

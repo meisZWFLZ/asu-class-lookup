@@ -134,29 +134,36 @@ export def "class search" [class_nbr --available (-a)] {
     }
   }
 }
-def log [msg] {
-  let timestamp = date now | into string;
-  print $"[($timestamp)] ($msg)"
-}
 
 export def class_checker_pingbot [--loop] {
+  use std/log;
   while true {
-    log "Checking classes for available seats..."
-    let classes = ["60296", "60299", "63576"]
-    let user_id = "513806934512762882"
-    let available = $classes | each { class search $in -a } | flatten
-    if ($available | length) > 0 {
-      log "Found available seats!"
-      let msg = "Found available seats!\n" + (
-        $available | each { 
-          $"($in.class_number) has ($in.seats.available) available seats! Details:\n" + (
-            $in | to nuon
-          ) 
-        } | str join "\n"
-      );
-      asu-class-pingbot say $user_id $msg
-    } else {
-      log "No available seats found."
+    try {
+      log debug "Checking classes for available seats..."
+      let classes = ["60296", "60299", "63576"]
+      let user_id = "513806934512762882"
+      let available = $classes | each { class search $in -a } | flatten
+      if ($available | length) > 0 {
+        log info "Found available seats!"
+        let msg = "Found available seats!\n" + (
+          $available | each { 
+            $"($in.class_number) has ($in.seats.available) available seats! Details:\n" + (
+              $in | to nuon
+            ) 
+          } | str join "\n"
+        );
+        asu-class-pingbot say $user_id $msg
+      } else {
+        log debug "No available seats found."
+      }
+    } catch { |e|
+      if $loop {
+        # If in loop mode, log the error and continue
+        log error $"Error occurred while checking classes: ($e)"
+      } else {
+        # If not in loop mode, forward the error
+        error make $e
+      }
     }
     if not $loop {
       break

@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use dotenvy::dotenv_iter;
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::prelude::*;
@@ -19,17 +18,14 @@ struct Cli {
     env: Option<PathBuf>,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Command,
 }
 
 #[derive(Subcommand)]
-enum Commands {
+enum Command {
     /// Runs slash command listener
-    Serve {
-        /// lists test values
-        #[arg(short, long)]
-        list: bool,
-    },
+    /// TODO: Implement slash command listener
+    Serve,
     /// Sends a message to the specified user
     Say {
         /// The user ID to send the message to
@@ -73,31 +69,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT;
 
-    // Create a new instance of the Client, logging in as a bot.
-    let mut client = Client::builder(&token, intents)
-        .event_handler(Handler)
-        .await
-        .expect("Err creating client");
-
     match cli.command {
-        Commands::Serve { list } => {
+        Command::Serve => {
+            // Create a new instance of the Client, logging in as a bot.
+            let mut client = Client::builder(&token, intents)
+                .event_handler(Handler)
+                .await?;
             // Start listening for events by starting a single shard
             if let Err(why) = client.start().await {
                 println!("Client error: {why:?}");
             };
         }
-        Commands::Say { user_id, content } => {
+        Command::Say { user_id, content } => {
+            let client = Client::builder(&token, intents).await?;
             client
                 .http
                 .get_user(user_id.into())
-                .await
-                .expect("User should exist and be accessible")
+                .await?
                 .create_dm_channel(&client.http)
-                .await
-                .expect("Retrieving DM channel should succeed")
+                .await?
                 .say(&client.http, content)
-                .await
-                .expect("Message should send successfully");
+                .await?;
         }
     }
 
