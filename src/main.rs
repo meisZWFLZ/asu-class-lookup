@@ -1,7 +1,9 @@
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
+use serenity::all::Ready;
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::prelude::*;
@@ -33,6 +35,8 @@ enum Command {
         /// The message content to send
         content: String,
     },
+    /// Checks that the bot can connect to the discord api
+    Check,
 }
 struct Handler;
 
@@ -47,8 +51,17 @@ impl EventHandler for Handler {
     }
 }
 
+struct CheckHandler;
+#[async_trait]
+impl EventHandler for CheckHandler {
+    async fn ready(&self, _ctx: Context, _data_about_bot: Ready) {
+        println!("Connected successfully to discord api!");
+        std::process::exit(0);
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     let token = cli
@@ -91,7 +104,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .say(&client.http, content)
                 .await?;
         }
+        Command::Check => {
+            let mut client = Client::builder(&token, intents)
+                .event_handler(CheckHandler)
+                .await?;
+            if let Err(why) = client.start().await {
+                eprintln!("Connection to discord api failed!: {}", why);
+                // Combining ExitCode and Result seems silly but it works ig and produces a more pleasant output
+                return Ok(ExitCode::FAILURE);
+            }
+        }
     }
 
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
