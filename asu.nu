@@ -3,7 +3,7 @@
 def "api fetch" [endpoint params: record] {
   let base_url = "https://eadvs-cscc-catalog-api.apps.asu.edu/catalog-microservices/api/v1";
   http get --headers {authorization: "Bearer null"} (
-    $base_url + "/" + $endpoint + "?" + ($params | transpose key value | each { $"($in.key)=($in.value)" } | str join "&")
+    $base_url + "/" + $endpoint + "?" + ($params | url build-query)
   )
 }
 def "api fetch class search" [params: record] {
