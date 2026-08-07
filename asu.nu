@@ -146,14 +146,14 @@ export def "course search" [subject number --after: string --before: string --av
   api fetch course $subject $number
   | beautify_class_data
   | reject "subject_number"
-  | do { 
+  | do {
     if $available {
       $in | where { $in.seats.available > 0 }
     } else {
       $in
     }
   }
-  | do { 
+  | do {
     if $after != null {
       let after_time = $after | into datetime;
       $in | where { ($in.start_time | into datetime) >= $after_time}
@@ -183,27 +183,81 @@ export def "class search" [class_nbr --available (-a)] {
   }
 }
 
-export def class_checker_pingbot [--loop] {
+export def class_checker_pingbot [--loop --state-file=./state/state.json] {
   use std/log;
   while true {
     try {
-      log debug "Checking classes for available seats..."
-      let classes = ["60296", "60299", "63576"]
+      let state: record = try { open --raw $state_file | from json } | default {}
+      let prev_available_classes = $state;
+      let class_numbers = ["60296", "60299", "63576", "63785"]
       let user_id = "513806934512762882"
-      let available = $classes | each { class search $in -a } | flatten
-      if ($available | length) > 0 {
-        log info "Found available seats!"
-        let msg = "Found available seats!\n" + (
-          $available | each { 
-            $"($in.class_number) has ($in.seats.available) available seats! Details:\n" + (
-              $in | to nuon
-            ) 
+
+      log debug $"Checking classes for changes in availability: ($class_numbers)"
+      
+      let classes = $class_numbers 
+        | each { class search $in} 
+        | flatten 
+        | insert seats.prev_available { |class|
+          $prev_available_classes | get -o $class.class_number
+        } | insert change { |class|
+          let seats = $class.seats
+          let delta = if $seats.prev_available != null {$seats.available - $seats.prev_available}
+          {
+            type: (
+              if $delta == null {
+                "new"
+              } else if $delta == 0 {
+                "none"
+              } else if $seats.available == 0 {
+                "close"
+              } else if $seats.prev_available == 0 {
+                "open"
+              } else if $delta > 0 {
+                "increase"
+              } else if $delta < 0 {
+                "decrease"
+              }
+            ),
+            delta: $delta
+          }
+        }
+      # Do not repeatedly notify for the same class
+      let changed_classes = $classes 
+        | where { |class| $class.change.type != "none" }
+
+      if ($changed_classes | length) > 0 {
+        log debug "Found changed available seats!"
+        let msg = "Found changed available seats!\n" + (
+          $changed_classes | each { |class|
+            let component = match $class.component {
+              "LAB" | "REC" => $" ($class.component)",
+              _ => ""
+            }
+            let class_desc = $"($class.subject_number)($component):($class.class_number)"
+            let change_desc = match $class.change.type {
+              "new" => "begun being tracked"
+              "close" => "closed",
+              "open" => "opened",
+              "increase" | "decrease" => $"($class.change.type)d by ($class.change.delta)",
+              _ => ""
+            };
+            let change_parentheses = $"\(($class.seats.prev_available | default "null")->($class.seats.available)\)"
+            let short_msg = $"($class_desc)'s availability has ($change_desc) ($change_parentheses)!"
+            log info $short_msg
+            $"($short_msg):
+            > ($class.description) runs from ($class.start_time) to ($class.end_time) on ($class.days) at ($class.campus) during session ($class.session)
+            > [catalog]\(($class.catalog_link)\)     [add to cart]\(($class.add_to_cart_link)\)
+            "
           } | str join "\n"
         );
         asu-class-pingbot say $user_id $msg
       } else {
-        log debug "No available seats found."
+        log debug "No change found."
       }
+      $classes
+        | each { |class| [$class.class_number, $class.seats.available] } 
+        | into record
+        | save $state_file --force
     } catch { |e|
       if $loop {
         # If in loop mode, log the error and continue

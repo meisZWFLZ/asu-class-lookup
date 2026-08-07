@@ -3,6 +3,8 @@
 
 # Discord token
 .env
+# State of app
+/state
 
 # Added by cargo
 
