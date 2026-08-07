@@ -31,35 +31,79 @@ export def "api fetch course" [subject number] {
 export def "api fetch class_nbr" [class_nbr] {
   api fetch class search {classNbr: $class_nbr}
 }
-def beautify_data [] {
-  let header_mapping = {
-    "CLASSNBR": "class_number",
-    "INSTRUCTORSLIST": "instructor",
-    "CAMPUS": "campus",
-    "STARTTIME": "start_time",
-    "ENDTIME": "end_time",
-    "DAYLIST": "days",
-    "COMPONENTPRIMARY": "component",
-    "seatInfo": "seats",
-    "STARTDATE": "start_date",
-    "ENDDATE": "end_date",
-    "GSGOLD": "general_studies_gold",
-    # Mostly useless
-    "SESSIONCODE": "session",
-    "COURSETITLE_LONG": "title",
-    "CRSEID": "course_id",
-    "CLASSSECTION": "class_section",
-    "CLASSDESCR": "description",
-    "NOTES": "notes",
-    # Removed later
-    "reservedSeatsInfo": "reserved_seats_info",
-    "STRM": "term",
+
+# Fetches detailed info about reserved seats, including the date they are unreserved.
+# Seems unnecessary, as after this date, the number of reserved seats is set to 1.
+export def "api fetch reserved_seats" [params: record] {
+  let endpoint = "search/reservedseatsadditionalinfo"
+  let renaming = {
+    term: term,
+    class_number: classNbr,
+    academic_career: classNbr,
+    course_id: crseId,
+    course_offer: crseOfferNbr,
+    class_section: classSection,
+    session: sessionCode
   }
-  let final_headers = $header_mapping | values | where $it != reserved_seats_info | append "catalog_link" | append "add_to_cart_link";
-  $in 
-  | flatten CLAS
-  | select --optional ...($header_mapping | columns)
-  | rename --column $header_mapping
+  api fetch $endpoint ($params | select ...($renaming | columns)| rename --column $renaming)
+}
+def beautify_class_data [] {
+  # TODO: look into moving the logic for processing this config and using it somewhere else
+  # TODO: perhaps embed the filters inside the config as closures
+  let key_mapping_config: list<record<old_key, new_key: string, drop: bool, expect: bool>> = {
+    CLAS.CLASSNBR: "class_number",
+    CLAS.INSTRUCTORSLIST: "instructor",
+    CLAS.CAMPUS: "campus",
+    CLAS.STARTTIME: "start_time",
+    CLAS.ENDTIME: "end_time",
+    SUBJECTNUMBER: "subject_number", # Unknown for class search command otherwise
+    DAYLIST: "days",
+    CLAS.COMPONENTPRIMARY: "component",
+    seatInfo: "seats",
+    CLAS.STARTDATE: "start_date",
+    CLAS.ENDDATE: "end_date",
+    GSGOLD: "general_studies_gold",
+    # Used for reserved seats endpoint
+    CLAS.CRSEID: "course_id",
+    CLAS.CRSEOFFERNBR: { new_key: "course_offer", drop: true },
+    CLAS.CLASSSECTION: "class_section",
+    CLAS.SESSIONCODE: "session",
+    CLAS.ACADCAREER: { new_key: "academic_career", drop: true },
+    reservedSeatsInfo: { new_key: "reserved_seats_info", drop: true},
+    CLAS.STRM: { new_key: "term", drop: true },
+    # Mostly useless
+    CLAS.COURSETITLE_LONG: "title",
+    CLAS.CLASSDESCR: "description",
+    NOTES: "notes",
+    # Added later
+    catalog_link: { expect: false },
+    add_to_cart_link: { expect: false },
+  } | items { |key, value| 
+    if (($value | describe -d | get type) == record) { 
+      $value | default $key new_key
+    } else { 
+      {new_key: $value}
+    } 
+    | default false drop 
+    | default true expect 
+    | insert old_key { |row|
+      if ($row.raw_old_key? | default false) {
+        $key 
+      } else {
+        $key | split row "." | into cell-path
+      }
+    }
+  }
+  let input_key_mapping = $key_mapping_config | where expect == true;
+  let input_key_mapping_record =  $input_key_mapping | each { [
+      ($in.old_key | split cell-path | get value | skip 0 | str join "."), 
+      $in.new_key
+    ] 
+  } | into record;
+  let final_keys = $key_mapping_config | where drop == false | get new_key;
+  $in
+  | select --optional ...($input_key_mapping | get old_key)
+  | rename --column $input_key_mapping_record
   | update instructor { 
     if ($in | length) == 1 { 
       $in.0
@@ -72,12 +116,15 @@ def beautify_data [] {
   | update seats { |row| 
     let seats = $row.seats
     let reserved = $row.reserved_seats_info
-    let available_reserved = if $reserved != null {
+    let all_available = $seats.ENRL_CAP - $seats.ENRL_TOT
+    
+    let available_reserved = if $all_available == 0 {
+      0
+    } else if $reserved != null {
       $reserved | each { |r| [($r.ENRL_CAP - $r.ENRL_TOT),0] | math max } | math sum
     } else {
       0
     }
-    let all_available = $seats.ENRL_CAP - $seats.ENRL_TOT
     {
       "max": $seats.ENRL_CAP,
       "all_available": $all_available,
@@ -92,12 +139,13 @@ def beautify_data [] {
     $"https://catalog.apps.asu.edu/catalog/classes/classlist?keywords=($row.class_number)&searchType=all&term=2267#detailsOpen=($row.class_number)-($row.course_id)"
   }
   | update days { $in.0 | split words | each {str trim} | str join "," }
-  | select --optional ...$final_headers
+  | select --optional ...$final_keys
 } 
 
 export def "course search" [subject number --after: string --before: string --available (-a)] {
   api fetch course $subject $number
-  | beautify_data
+  | beautify_class_data
+  | reject "subject_number"
   | do { 
     if $available {
       $in | where { $in.seats.available > 0 }
@@ -125,7 +173,7 @@ export def "course search" [subject number --after: string --before: string --av
 
 export def "class search" [class_nbr --available (-a)] {
   api fetch class_nbr $class_nbr
-  | beautify_data
+  | beautify_class_data
   | do { 
     if $available {
       $in | where { $in.seats.available > 0 }
