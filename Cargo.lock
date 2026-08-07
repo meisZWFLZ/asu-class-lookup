@@ -83,7 +83,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "asu-class-lookup"
+name = "asu-class-pingbot"
 version = "0.1.0"
 dependencies = [
  "clap",
