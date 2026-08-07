@@ -185,12 +185,22 @@ export def "class search" [class_nbr --available (-a)] {
 
 export def class_checker_pingbot [--loop --state-file=./state/state.json] {
   use std/log;
+  
+  let owner_id = "513806934512762882"
+  let class_numbers = ["60296", "60299", "63576", "63785", "62592"]
+  let max_error_count = 5
+  let interval = 5min;
+
+  asu-class-pingbot check
+  asu-class-pingbot say $owner_id "Listening begun!"
+
+  # Records consecutive errors
+  mut consecutive_errors: list = [];
   while true {
     try {
       let state: record = try { open --raw $state_file | from json } | default {}
       let prev_available_classes = $state;
-      let class_numbers = ["60296", "60299", "63576", "63785"]
-      let user_id = "513806934512762882"
+      let user_id = $owner_id
 
       log debug $"Checking classes for changes in availability: ($class_numbers)"
       
@@ -233,7 +243,7 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
               "LAB" | "REC" => $" ($class.component)",
               _ => ""
             }
-            let class_desc = $"($class.subject_number)($component):($class.class_number)"
+            let class_desc = $"($class.class_number) \(($class.subject_number)($component)\)"
             let change_desc = match $class.change.type {
               "new" => "begun being tracked"
               "close" => "closed",
@@ -262,15 +272,26 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
       if $loop {
         # If in loop mode, log the error and continue
         log error $"Error occurred while checking classes: ($e)"
+        {error: $e}
       } else {
         # If not in loop mode, forward the error
         error make $e
       }
+    } | if (($in | describe -d).type == record and $in.error? != null) {
+      let error = $in.error
+      $consecutive_errors = $consecutive_errors | append $"($error)"
+      if ($consecutive_errors | length) == $max_error_count {
+        asu-class-pingbot say $owner_id ($"Many errors encountered!:
+        ($consecutive_errors | to nuon --indent 2)" | str substring 0..1996) 
+        log critical "Many consecutive errors encountered! Owner pinged!"
+      }
+    } else {
+      $consecutive_errors = [];
     }
     if not $loop {
       break
     }
-    sleep 5min # Check every 5 minutes
+    sleep $interval # Check every 5 minutes
   }
 }
 
