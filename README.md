@@ -1,19 +1,24 @@
+Messages user(s) when availability for a class they're watching has changed.
+
 ## Notes
 - Usage
   - Discord bot
-    - Place your discord token in `.env`. For example,       
+    1. Place your bot's discord token in `.env`. For example:      
       ```ini
       DISCORD_TOKEN=blah-blah-balh
       ```
-    - Run `docker compose up -d`
-  - Run the cache proxy:
-    ```bash
-    use http-cache; http-cache start
-    ```
+    2. Set your user id and the class numbers you want to watch in `asu.nu`
+    3. Run `docker compose up -d`
+    4. You should now be messaged "Listening begun!" by the bot, 
+        and another message about the classes you're watching.
+        If this doesn't occur, either your token or user id is misconfigured.
+        Check the logs for error messages by running `docker compose logs`
+  - Run the cache proxy thing, if you want (I forgot how it works tbh)
 - Todo:
-  - Don't hardcode user and class number for pinger
+  - Don't hardcode user and watched class numbers
+  - Handle new terms
   - Implement slash commands
-  - Migrate data processing to rust perhaps
+  - Reimplement http api in rust? (remove all nushell stuff)
 - RE
   - Gets course listings for MAE 201:
     ```nu
