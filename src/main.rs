@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use serenity::all::Ready;
+use serenity::all::{CreateMessage, MessageBuilder, MessageFlags, Ready};
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::prelude::*;
@@ -34,6 +34,9 @@ enum Command {
         user_id: u64,
         /// The message content to send
         content: String,
+        /// Specifies whether the recipient of the message should be pinged
+        #[arg(short, long)]
+        ping: bool,
     },
     /// Checks that the bot can connect to the discord api
     Check,
@@ -93,7 +96,11 @@ async fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 println!("Client error: {why:?}");
             };
         }
-        Command::Say { user_id, content } => {
+        Command::Say {
+            user_id,
+            content,
+            ping,
+        } => {
             let client = Client::builder(&token, intents).await?;
             client
                 .http
@@ -101,7 +108,15 @@ async fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 .await?
                 .create_dm_channel(&client.http)
                 .await?
-                .say(&client.http, content)
+                .send_message(
+                    &client.http,
+                    CreateMessage::new().content(content).flags(if ping {
+                        MessageFlags::default()
+                    } else {
+                        MessageFlags::SUPPRESS_NOTIFICATIONS
+                    }),
+                )
+                // .say(&client.http, content)
                 .await?;
         }
         Command::Check => {

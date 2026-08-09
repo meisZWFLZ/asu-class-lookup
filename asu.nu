@@ -187,7 +187,15 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
   use std/log;
   
   let owner_id = "513806934512762882"
-  let class_numbers = ["60296", "60299", "63576", "63785", "62592"]
+  let class_numbers = [
+    "60296", # CHM 114 LAB: M 2PM
+    "60297", # CHM 114 LAB: T 2PM
+    "60299", # CHM 114 LAB: M 2PM
+    "61709", # CHM 114 LAB: T 2PM
+    "63576", # CHM 114 LAB: W 2PM
+    "62592", # CHM 114 LAB: M 12PM
+    "63785", # MAT 114: 3:00 PM (Test class)
+  ]
   let max_error_count = 5
   let interval = 5min;
 
@@ -234,10 +242,28 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
       # Do not repeatedly notify for the same class
       let changed_classes = $classes 
         | where { |class| $class.change.type != "none" }
-
       if ($changed_classes | length) > 0 {
-        log debug "Found changed available seats!"
-        let msg = "Found changed available seats!\n" + (
+        let opened_classes_count = $changed_classes | where { |class| $class.change.type == "open" } | length
+        let other_classes_count = ($changed_classes | length) - $opened_classes_count
+        let did_a_class_open = $opened_classes_count > 0
+        let should_ping = $did_a_class_open
+
+        let title = "Found " + ([
+          ...(if $opened_classes_count > 0 {
+            let plural_class = if $opened_classes_count == 1 {"class"} else {"classes"}
+            [$"($opened_classes_count) opened ($plural_class)"]
+          } else {
+            []
+          }),
+          ...(if $other_classes_count > 0 {
+            let plural_changes = if $opened_classes_count == 1 {"change"} else {"changes"}
+            [$"($other_classes_count) $(if $did_a_class_open {"other"} else {""}) ($plural_changes) in availability"]
+          } else {
+            []
+          })
+        ] | str join " and ") + "!"
+        log debug $title
+        let msg = $title + "\n" + (
           $changed_classes | each { |class|
             let component = match $class.component {
               "LAB" | "REC" => $" ($class.component)",
@@ -260,7 +286,7 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
             "
           } | str join "\n"
         );
-        asu-class-pingbot say $user_id $msg
+        asu-class-pingbot say $user_id $msg ...(if $should_ping { [--ping] } else { [] })
       } else {
         log debug "No change found."
       }
@@ -281,7 +307,7 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
       let error = $in.error
       $consecutive_errors = $consecutive_errors | append $"($error)"
       if ($consecutive_errors | length) == $max_error_count {
-        asu-class-pingbot say $owner_id ($"Many errors encountered!:
+        asu-class-pingbot say --ping $owner_id ($"Many errors encountered!:
         ($consecutive_errors | to nuon --indent 2)" | str substring 0..1996) 
         log critical "Many consecutive errors encountered! Owner pinged!"
       }
