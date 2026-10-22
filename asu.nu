@@ -254,8 +254,8 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
             []
           }),
           ...(if $other_classes_count > 0 {
-            let plural_changes = if $opened_classes_count == 1 {"change"} else {"changes"}
-            [$"($other_classes_count) $(if $did_a_class_open {"other"} else {""}) ($plural_changes) in availability"]
+            let plural_changes = if $other_classes_count == 1 {"change"} else {"changes"}
+            [$"($other_classes_count) (if $did_a_class_open {'other '} else {''})($plural_changes) in availability"]
           } else {
             []
           })
