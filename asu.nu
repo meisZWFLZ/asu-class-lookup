@@ -1,14 +1,16 @@
 #!/usr/bin/env nu
 
+const default_term = 2271
+
 def "api fetch" [endpoint params: record] {
   let base_url = "https://eadvs-cscc-catalog-api.apps.asu.edu/catalog-microservices/api/v1";
   http get --headers {authorization: "Bearer null"} (
     $base_url + "/" + $endpoint + "?" + ($params | url build-query)
   )
 }
-def "api fetch class search" [params: record] {
+def "api fetch class search" [params: record, --term=$default_term] {
   # TODO: don't hardcode the term
-  let default_params = {term: 2267, refine: "Y", campusOrOnlineSelection: "C"};
+  let default_params = {term: 2271, refine: "Y", campusOrOnlineSelection: "C"};
   let params = $default_params | merge $params;
   let res = api fetch "search/classes" $params
   let total_num = $res | get total.value;
@@ -136,7 +138,7 @@ def beautify_class_data [] {
     $"https://go.oasis.asu.edu/addclass?STRM=($row.term)&ASU_CLASS_NBR=($row.class_number)"
   }
   | insert catalog_link { |row| 
-    $"https://catalog.apps.asu.edu/catalog/classes/classlist?keywords=($row.class_number)&searchType=all&term=2267#detailsOpen=($row.class_number)-($row.course_id)"
+    $"https://catalog.apps.asu.edu/catalog/classes/classlist?keywords=($row.class_number)&searchType=all&term=($row.term)#detailsOpen=($row.class_number)-($row.course_id)"
   }
   | update days { $in.0 | split words | each {str trim} | str join "," }
   | select --optional ...$final_keys
@@ -186,15 +188,11 @@ export def "class search" [class_nbr --available (-a)] {
 export def class_checker_pingbot [--loop --state-file=./state/state.json] {
   use std/log;
   
+  # TODO: make this configurable
   let owner_id = "513806934512762882"
   let class_numbers = [
-    "60296", # CHM 114 LAB: M 2PM
-    "60297", # CHM 114 LAB: T 2PM
-    "60299", # CHM 114 LAB: M 2PM
-    "61709", # CHM 114 LAB: T 2PM
-    "63576", # CHM 114 LAB: W 2PM
-    "62592", # CHM 114 LAB: M 12PM
-    "63785", # MAT 114: 3:00 PM (Test class)
+    "15780", # EEE 202: Marnie Wong
+    "11346", # EEE 202: Staff (test class)
   ]
   let max_error_count = 5
   let interval = 5min;
