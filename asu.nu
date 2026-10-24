@@ -185,17 +185,34 @@ export def "class search" [class_nbr --available (-a)] {
   }
 }
 
-export def class_checker_pingbot [--loop --state-file=./state/state.json] {
+export def class_checker_pingbot [
+  --loop
+  --state-file=./state/data.json
+  --config-file=./state/config.json
+] {
   use std/log;
-  
-  # TODO: make this configurable
-  let owner_id = "513806934512762882"
-  let class_numbers = [
-    "15780", # EEE 202: Marnie Wong
-    "11346", # EEE 202: Staff (test class)
-  ]
   let max_error_count = 5
   let interval = 5min;
+
+  let user_config: record = open --raw $config_file | from json
+  let owner_id = $user_config.owner | into int
+  let users = $user_config.users | items { |user_id, config|
+    {
+      user_id: ($user_id | into int),
+      watched_classes: ($config.listening_to | each { into string })
+    }
+  }
+  if ($users | length) == 0 {
+    error make { msg: $"No users configured in ($config_file)" }
+  }
+  # The classes we are watching
+  let class_numbers = $users
+    | get watched_classes
+    | flatten
+    | uniq
+  if ($class_numbers | length) == 0 {
+    error make { msg: $"No classes configured in ($config_file)" }
+  }
 
   asu-class-pingbot check
   asu-class-pingbot say $owner_id "Listening begun!"
@@ -206,10 +223,10 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
     try {
       let state: record = try { open --raw $state_file | from json } | default {}
       let prev_available_classes = $state;
-      let user_id = $owner_id
 
       log debug $"Checking classes for changes in availability: ($class_numbers)"
       
+      # Get data for all the classes we are watching and determine the changes in availability 
       let classes = $class_numbers 
         | each { class search $in} 
         | flatten 
@@ -237,15 +254,32 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
             delta: $delta
           }
         }
-      # Do not repeatedly notify for the same class
       let changed_classes = $classes 
         | where { |class| $class.change.type != "none" }
-      if ($changed_classes | length) > 0 {
+      
+      # If no changes were found, wait another interval and check again
+      if ($changed_classes | length) <= 0 {     
+        log debug "No change found."
+        continue 
+      }
+
+      $users | each { |user| {
+          ..user,
+          # Filter the changed classes to only those that the user is watching
+          changed_classes: $changed_classes | where { |class|
+            $user.watched_classes | any { |watched_class_number| $watched_class_number == $class.class_number }
+          }
+        }
+      }
+      # Only message users who have changed classes
+      | where { |user| ($user.changed_classes | length) > 0 }
+      | each { |user|
+        let changed_classes = $user.changed_classes
         let opened_classes_count = $changed_classes | where { |class| $class.change.type == "open" } | length
         let other_classes_count = ($changed_classes | length) - $opened_classes_count
         let did_a_class_open = $opened_classes_count > 0
-        let should_ping = $did_a_class_open
 
+        # Generate a short summary of the number of changes and the types of changes
         let title = "Found " + ([
           ...(if $opened_classes_count > 0 {
             let plural_class = if $opened_classes_count == 1 {"class"} else {"classes"}
@@ -260,7 +294,9 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
             []
           })
         ] | str join " and ") + "!"
-        log debug $title
+        log debug $"Sending update to ($user.user_id): ($title)"
+
+        # Generate a detailed message about each change and the associated class
         let msg = $title + "\n" + (
           $changed_classes | each { |class|
             let component = match $class.component {
@@ -277,17 +313,16 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
             };
             let change_parentheses = $"\(($class.seats.prev_available | default "null")->($class.seats.available)\)"
             let short_msg = $"($class_desc)'s availability has ($change_desc) ($change_parentheses)!"
-            log info $short_msg
+            log info $"($user.user_id): ($short_msg)"
             $"($short_msg):
             > ($class.description) runs from ($class.start_time) to ($class.end_time) on ($class.days) at ($class.campus) during session ($class.session)
             > [catalog]\(($class.catalog_link)\)     [add to cart]\(($class.add_to_cart_link)\)
             "
           } | str join "\n"
         );
-        asu-class-pingbot say $user_id $msg ...(if $should_ping { [--ping] } else { [] })
-      } else {
-        log debug "No change found."
+        asu-class-pingbot say $user.user_id $msg ...(if $did_a_class_open { [--ping] } else { [] }) 
       }
+      # Save the current availability of all classes to the state file for future comparisons
       $classes
         | each { |class| [$class.class_number, $class.seats.available] } 
         | into record
@@ -304,9 +339,11 @@ export def class_checker_pingbot [--loop --state-file=./state/state.json] {
     } | if (($in | describe -d).type == record and $in.error? != null) {
       let error = $in.error
       $consecutive_errors = $consecutive_errors | append $"($error)"
+      # If multiple consecutive errors have occurred, ping the owner to alert them
       if ($consecutive_errors | length) == $max_error_count {
-        asu-class-pingbot say --ping $owner_id ($"Many errors encountered!:
-        ($consecutive_errors | to nuon --indent 2)" | str substring 0..1996) 
+        let error_message = ($"Many errors encountered!:
+        ($consecutive_errors | to nuon --indent 2)" | str substring 0..1996)
+        asu-class-pingbot say --ping $owner_id $error_message 
         log critical "Many consecutive errors encountered! Owner pinged!"
       }
     } else {
