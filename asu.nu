@@ -192,7 +192,7 @@ export def class_checker_pingbot [
 ] {
   use std/log;
   let max_error_count = 5
-  let interval = 5min;
+  let interval = 2.5min;
 
   let user_config: record = open --raw $config_file | from json
   let owner_id = $user_config.owner | into int
@@ -260,73 +260,72 @@ export def class_checker_pingbot [
       # If no changes were found, wait another interval and check again
       if ($changed_classes | length) <= 0 {     
         log debug "No change found."
-        continue 
-      }
-
-      $users | each { |user| {
-          ..user,
+      } else {
+        $users | each { |user| {
           # Filter the changed classes to only those that the user is watching
-          changed_classes: $changed_classes | where { |class|
-            $user.watched_classes | any { |watched_class_number| $watched_class_number == $class.class_number }
-          }
+              changed_classes: ($changed_classes | where { |class|
+              $user.watched_classes | any { |watched_class_number| $watched_class_number == $class.class_number }
+            }),
+          ...$user,
         }
-      }
-      # Only message users who have changed classes
-      | where { |user| ($user.changed_classes | length) > 0 }
-      | each { |user|
-        let changed_classes = $user.changed_classes
-        let opened_classes_count = $changed_classes | where { |class| $class.change.type == "open" } | length
-        let other_classes_count = ($changed_classes | length) - $opened_classes_count
-        let did_a_class_open = $opened_classes_count > 0
+        }
+        # Only message users who have changed classes
+        | where { |user| ($user.changed_classes | length) > 0 }
+        | each { |user|
+          let changed_classes = $user.changed_classes
+          let opened_classes_count = $changed_classes | where { |class| $class.change.type == "open" } | length
+          let other_classes_count = ($changed_classes | length) - $opened_classes_count
+          let did_a_class_open = $opened_classes_count > 0
 
-        # Generate a short summary of the number of changes and the types of changes
-        let title = "Found " + ([
-          ...(if $opened_classes_count > 0 {
-            let plural_class = if $opened_classes_count == 1 {"class"} else {"classes"}
-            [$"($opened_classes_count) opened ($plural_class)"]
-          } else {
-            []
-          }),
-          ...(if $other_classes_count > 0 {
-            let plural_changes = if $other_classes_count == 1 {"change"} else {"changes"}
-            [$"($other_classes_count) (if $did_a_class_open {'other '} else {''})($plural_changes) in availability"]
-          } else {
-            []
-          })
-        ] | str join " and ") + "!"
-        log debug $"Sending update to ($user.user_id): ($title)"
+          # Generate a short summary of the number of changes and the types of changes
+          let title = "Found " + ([
+            ...(if $opened_classes_count > 0 {
+              let plural_class = if $opened_classes_count == 1 {"class"} else {"classes"}
+              [$"($opened_classes_count) opened ($plural_class)"]
+            } else {
+              []
+            }),
+            ...(if $other_classes_count > 0 {
+              let plural_changes = if $other_classes_count == 1 {"change"} else {"changes"}
+              [$"($other_classes_count) (if $did_a_class_open {'other '} else {''})($plural_changes) in availability"]
+            } else {
+              []
+            })
+          ] | str join " and ") + "!"
+          log debug $"Sending update to ($user.user_id): ($title)"
 
-        # Generate a detailed message about each change and the associated class
-        let msg = $title + "\n" + (
-          $changed_classes | each { |class|
-            let component = match $class.component {
-              "LAB" | "REC" => $" ($class.component)",
-              _ => ""
-            }
-            let class_desc = $"($class.class_number) \(($class.subject_number)($component)\)"
-            let change_desc = match $class.change.type {
-              "new" => "begun being tracked"
-              "close" => "closed",
-              "open" => "opened",
-              "increase" | "decrease" => $"($class.change.type)d by ($class.change.delta)",
-              _ => ""
-            };
-            let change_parentheses = $"\(($class.seats.prev_available | default "null")->($class.seats.available)\)"
-            let short_msg = $"($class_desc)'s availability has ($change_desc) ($change_parentheses)!"
-            log info $"($user.user_id): ($short_msg)"
-            $"($short_msg):
-            > ($class.description) runs from ($class.start_time) to ($class.end_time) on ($class.days) at ($class.campus) during session ($class.session)
-            > [catalog]\(($class.catalog_link)\)     [add to cart]\(($class.add_to_cart_link)\)
-            "
-          } | str join "\n"
-        );
-        asu-class-pingbot say $user.user_id $msg ...(if $did_a_class_open { [--ping] } else { [] }) 
+          # Generate a detailed message about each change and the associated class
+          let msg = $title + "\n" + (
+            $changed_classes | each { |class|
+              let component = match $class.component {
+                "LAB" | "REC" => $" ($class.component)",
+                _ => ""
+              }
+              let class_desc = $"($class.class_number) \(($class.subject_number)($component)\)"
+              let change_desc = match $class.change.type {
+                "new" => "begun being tracked"
+                "close" => "closed",
+                "open" => "opened",
+                "increase" | "decrease" => $"($class.change.type)d by ($class.change.delta)",
+                _ => ""
+              };
+              let change_parentheses = $"\(($class.seats.prev_available | default "null")->($class.seats.available)\)"
+              let short_msg = $"($class_desc)'s availability has ($change_desc) ($change_parentheses)!"
+              log info $"($user.user_id): ($short_msg)"
+              $"($short_msg):
+              > ($class.description) by ($class.instructor) runs from ($class.start_time) to ($class.end_time) on ($class.days) at ($class.campus) during session ($class.session)
+              > [catalog]\(($class.catalog_link)\)     [add to cart]\(($class.add_to_cart_link)\)
+              "
+            } | str join "\n"
+          );
+          asu-class-pingbot say $user.user_id $msg ...(if $did_a_class_open { [--ping] } else { [] }) 
+        }
+        # Save the current availability of all classes to the state file for future comparisons
+        $classes
+          | each { |class| [$class.class_number, $class.seats.available] } 
+          | into record
+          | save $state_file --force
       }
-      # Save the current availability of all classes to the state file for future comparisons
-      $classes
-        | each { |class| [$class.class_number, $class.seats.available] } 
-        | into record
-        | save $state_file --force
     } catch { |e|
       if $loop {
         # If in loop mode, log the error and continue
